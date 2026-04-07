@@ -125,6 +125,55 @@ query fetchNegRiskEventsMaker($lastId: String!, $assetIds: [String!]!, $first: I
 ORDERFILLED_QUERY = ORDERFILLED_QUERY_TAKER
 NEG_RISK_ORDERFILLED_QUERY = NEG_RISK_ORDERFILLED_QUERY_TAKER
 
+# ── Wallet history queries ────────────────────────────────────────────────────
+# All standard OrderFilled events where a specific address is the maker
+WALLET_FILLS_QUERY = """
+query walletFills($address: String!, $lastId: String!, $first: Int!) {
+  orderFilleds(
+    first: $first,
+    where: { id_gt: $lastId, maker: $address },
+    orderBy: id,
+    orderDirection: asc
+  ) {
+    id
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    blockTimestamp
+  }
+}
+"""
+
+# Same for NegRisk CTF Exchange
+NEG_RISK_WALLET_FILLS_QUERY = """
+query walletNegRiskFills($address: String!, $lastId: String!, $first: Int!) {
+  negRiskCtfExchangeOrderFilleds(
+    first: $first,
+    where: { id_gt: $lastId, maker: $address },
+    orderBy: id,
+    orderDirection: asc
+  ) {
+    id
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    blockTimestamp
+  }
+}
+"""
+
+# Batch resolve token IDs → condition IDs (Orderbook subgraph)
+TOKEN_CONDITIONS_QUERY = """
+query tokenConditions($tokenIds: [String!]!) {
+  marketDatas(first: 1000, where: { id_in: $tokenIds }) {
+    id
+    condition
+  }
+}
+"""
+
 # Query the Orderbook subgraph for MarketData (token IDs per condition)
 MARKET_DATA_QUERY = """
 query getMarketTokenIds($conditionId: String!) {
@@ -361,6 +410,76 @@ class SubgraphIndexer:
             if len(batch) < batch_size:
                 break
             await asyncio.sleep(0.1)  # be a good API citizen
+
+
+    async def fetch_wallet_all_trades(self, address: str) -> list[dict]:
+        """
+        Fetch ALL OrderFilled events where `address` is the maker,
+        covering both CTF Exchange (standard) and NegRisk CTF Exchange.
+
+        Cursor-paginates both entities until exhausted. Returns a flat list
+        of raw event dicts for the caller to aggregate (volume, market count, etc).
+        """
+        address = address.lower()
+        batch_size = 1000
+        all_events: list[dict] = []
+
+        # ── Standard fills ─────────────────────────────────────────────────
+        last_id = ""
+        while True:
+            vars_ = {"address": address, "lastId": last_id, "first": batch_size}
+            data = await self._query(WALLET_FILLS_QUERY, vars_)
+            if not data:
+                break
+            batch = data.get("orderFilleds") or []
+            all_events.extend(batch)
+            if len(batch) < batch_size:
+                break
+            last_id = batch[-1]["id"]
+            await asyncio.sleep(0.05)
+
+        # ── NegRisk fills ──────────────────────────────────────────────────
+        last_id = ""
+        while True:
+            vars_ = {"address": address, "lastId": last_id, "first": batch_size}
+            data = await self._query(NEG_RISK_WALLET_FILLS_QUERY, vars_)
+            if not data:
+                break
+            batch = data.get("negRiskCtfExchangeOrderFilleds") or []
+            all_events.extend(batch)
+            if len(batch) < batch_size:
+                break
+            last_id = batch[-1]["id"]
+            await asyncio.sleep(0.05)
+
+        logger.info(f"fetch_wallet_all_trades: {len(all_events)} total events for {address}")
+        return all_events
+
+    async def resolve_token_conditions(self, token_ids: list[str]) -> dict[str, str]:
+        """
+        Map token IDs → condition IDs via the Orderbook subgraph's MarketData entity.
+        Batches in chunks of 500 to stay within GraphQL query size limits.
+        Returns {tokenId: conditionId}. Token IDs with no match (e.g. collateral "0") are omitted.
+        """
+        result: dict[str, str] = {}
+        chunk_size = 500
+
+        for i in range(0, len(token_ids), chunk_size):
+            chunk = token_ids[i : i + chunk_size]
+            data = await self._query(
+                TOKEN_CONDITIONS_QUERY,
+                {"tokenIds": chunk},
+                subgraph_id=ORDERBOOK_SUBGRAPH_ID,
+            )
+            if not data:
+                continue
+            for md in data.get("marketDatas") or []:
+                token_id = md.get("id", "")
+                condition = md.get("condition", "")
+                if token_id and condition:
+                    result[token_id] = condition
+
+        return result
 
 
 subgraph_indexer = SubgraphIndexer()

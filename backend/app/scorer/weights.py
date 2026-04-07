@@ -11,7 +11,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "entryTiming": 0.30,
     "marketCount": 0.20,
     "walletAge": 0.25,
-    "tradeSize": 0.15,
+    "tradeSize": 0.8,
     "concentration": 0.10,
 }
 

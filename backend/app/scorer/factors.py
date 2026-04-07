@@ -25,18 +25,7 @@ def factor_entry_timing(
     position = (trade_timestamp - market_creation_timestamp) / lifetime
     position = max(0.0, min(1.0, position))
 
-    if position >= 0.95:
-        return 1.0
-    elif position >= 0.90:
-        return 0.85
-    elif position >= 0.80:
-        return 0.65
-    elif position >= 0.70:
-        return 0.45
-    elif position >= 0.50:
-        return 0.20
-    else:
-        return 0.05
+    return position
 
 
 def factor_market_count(
@@ -50,18 +39,12 @@ def factor_market_count(
     if markets_traded <= 0:
         markets_traded = 1
 
-    if markets_traded == 1:
-        return 1.0
-    elif markets_traded == 2:
-        return 0.85
-    elif markets_traded == 3:
-        return 0.65
-    elif markets_traded == 4:
-        return 0.40
-    elif markets_traded == 5:
-        return 0.20
-    else:
+    if markets_traded < 5:
+        return float(1/int(markets_traded))
+    elif markets_traded < 50:
         return 0.05
+    else: 
+        return 0.0
 
 
 def factor_trade_size(
@@ -118,22 +101,12 @@ def factor_wallet_age(
     if age_at_trade_days < 0:
         return 0.0  # Data error — wallet created after trade
 
-    if age_at_trade_days == 0:
+    if age_at_trade_days < 7:
         return 1.0
-    elif age_at_trade_days <= 1:
-        return 0.95
-    elif age_at_trade_days <= 3:
-        return 0.85
-    elif age_at_trade_days <= 7:
-        return 0.70
-    elif age_at_trade_days <= 14:
-        return 0.45
-    elif age_at_trade_days <= 30:
-        return 0.25
-    elif age_at_trade_days <= 90:
-        return 0.10
+    elif age_at_trade_days >= 7 and age_at_trade_days <= 90:
+        return 1 / (age_at_trade_days // 7)
     else:
-        return 0.02
+        return 0
 
 
 def factor_concentration(
@@ -152,18 +125,8 @@ def factor_concentration(
 
     if share >= 0.90:
         return 1.0
-    elif share >= 0.75:
-        return 0.85
-    elif share >= 0.60:
-        return 0.70
-    elif share >= 0.50:
-        return 0.55
-    elif share >= 0.35:
-        return 0.35
-    elif share >= 0.20:
-        return 0.15
     else:
-        return 0.05
+        return share
 
 
 def compute_market_manipulability(liquidity_usdc: float) -> float:

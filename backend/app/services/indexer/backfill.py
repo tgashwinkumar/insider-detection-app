@@ -270,9 +270,20 @@ class BackfillOrchestrator:
                 condition_id, clean_wallets
             )
             if not dispatched:
-                # Celery unavailable — run inline (slower but always works)
+                # Celery unavailable — run inline (slower but always works).
+                # Mirror exactly what enrich_wallets_task does: deposits first,
+                # then wallet stats, then score. Without the stats update the
+                # three wallet-dependent factors (marketCount, walletAge,
+                # concentration) all collapse to their fixed fallback values,
+                # making every wallet score identically.
                 from app.services.indexer.deposit_indexer import deposit_indexer
+                from app.services.wallet_service import wallet_service
                 await deposit_indexer.index_wallets(clean_wallets)
+                for addr in clean_wallets:
+                    try:
+                        await wallet_service.update_wallet_stats(addr)
+                    except Exception as e:
+                        logger.warning(f"Inline stat update failed for {addr}: {e}")
                 await self._score_market_inline(condition_id)
 
         # ── Step 6: Mark job done ──────────────────────────────────────────────
