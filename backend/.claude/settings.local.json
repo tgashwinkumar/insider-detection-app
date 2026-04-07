@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:docs.etherscan.io)",
+      "WebFetch(domain:thegraph.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\LENOVO\\\\insider-trader-detection-assignment\\\\backend\\\\app\\\\models\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\LENOVO\\\\insider-trader-detection-assignment\\\\backend\\\\app\\\\routers\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\LENOVO\\\\insider-trader-detection-assignment\\\\backend\\\\app\\\\services\\\\indexer\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\LENOVO\\\\insider-trader-detection-assignment\\\\backend\\\\app\\\\scorer\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\LENOVO\\\\insider-trader-detection-assignment\\\\backend\\\\app\\\\tasks\")",
+      "WebSearch"
+    ]
+  }
+}

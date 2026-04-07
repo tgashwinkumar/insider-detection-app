@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "mcp__stitch__create_project",
+      "mcp__stitch__create_design_system",
+      "mcp__stitch__generate_screen_from_text",
+      "mcp__stitch__list_screens",
+      "mcp__stitch__edit_screens",
+      "Bash(python -m pytest tests/unit/test_backfill.py -v)",
+      "Bash(python -m pytest tests/unit/test_backfill.py -v -p no:web3)",
+      "Bash(pip install:*)"
+    ]
+  }
+}
