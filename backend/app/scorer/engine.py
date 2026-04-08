@@ -84,6 +84,18 @@ class ScoringEngine:
             wallet_total_volume_usdc=wallet.total_volume_usdc or trade.amount_usdc,
         )
 
+        # Raw source values for UI display
+        src_entry_delta = float(
+            (resolution_ts or (trade.timestamp + 86400 * 7)) - trade.timestamp
+        )
+        src_market_count = wallet.markets_traded or 1
+        src_trade_size = trade.amount_usdc
+        src_wallet_age_days = (
+            float(trade.timestamp - wallet.first_deposit_timestamp) / 86400.0
+            if wallet.first_deposit_timestamp else None
+        )
+        src_wallet_total_volume = wallet.total_volume_usdc or trade.amount_usdc
+
         # Composite weighted score
         w = self.weights
         composite = (
@@ -105,6 +117,11 @@ class ScoringEngine:
             existing.factor_trade_size = f_size
             existing.factor_wallet_age = f_age
             existing.factor_concentration = f_concentration
+            existing.source_entry_timing_delta_seconds = src_entry_delta
+            existing.source_market_count = src_market_count
+            existing.source_trade_size_usdc = src_trade_size
+            existing.source_wallet_age_days = src_wallet_age_days
+            existing.source_wallet_total_volume_usdc = src_wallet_total_volume
             existing.composite_score = composite
             existing.classification = classification
             existing.weights_used = self.weights
@@ -121,6 +138,11 @@ class ScoringEngine:
                 factor_trade_size=f_size,
                 factor_wallet_age=f_age,
                 factor_concentration=f_concentration,
+                source_entry_timing_delta_seconds=src_entry_delta,
+                source_market_count=src_market_count,
+                source_trade_size_usdc=src_trade_size,
+                source_wallet_age_days=src_wallet_age_days,
+                source_wallet_total_volume_usdc=src_wallet_total_volume,
                 composite_score=composite,
                 classification=classification,
                 weights_used=self.weights,

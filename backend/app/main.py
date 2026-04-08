@@ -76,11 +76,12 @@ async def lifespan(app: FastAPI):
     await _recover_pending_ingest_jobs()
 
     # Start live event listener
-    try:
-        from app.services.indexer.live_listener import start_live_listener
-        start_live_listener()
-    except Exception as e:
-        logger.warning(f"Live listener failed to start: {e}")
+    # Commenting out live listener - to check for bandwidth availability for subgraphs
+    # try:
+    #     from app.services.indexer.live_listener import start_live_listener
+    #     start_live_listener()
+    # except Exception as e:
+    #     logger.warning(f"Live listener failed to start: {e}")
 
     logger.info("SENTINEL backend ready")
     yield
@@ -89,11 +90,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down SENTINEL backend...")
     from app.database import close_database
     from app.redis_client import close_redis
-    from app.services.indexer.live_listener import stop_live_listener
+    # from app.services.indexer.live_listener import stop_live_listener
     from app.utils.etherscan import etherscan_client
     from app.services.market_service import market_service
 
-    stop_live_listener()
+    # stop_live_listener()
     await close_database()
     await close_redis()
     await etherscan_client.close()

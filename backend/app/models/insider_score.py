@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from beanie import Document, Indexed
 from pydantic import Field
 import pymongo
@@ -14,6 +15,12 @@ class InsiderScore(Document):
     factor_trade_size: float
     factor_wallet_age: float
     factor_concentration: float
+    # Raw source values used to compute each factor (for UI display)
+    source_entry_timing_delta_seconds: Optional[float] = None   # resolution_ts - trade_ts
+    source_market_count: Optional[int] = None                   # wallet.markets_traded
+    source_trade_size_usdc: Optional[float] = None              # trade.amount_usdc
+    source_wallet_age_days: Optional[float] = None              # wallet age at trade time (days)
+    source_wallet_total_volume_usdc: Optional[float] = None     # wallet.total_volume_usdc
     # Composite
     composite_score: float  # 0.0-1.0
     classification: str  # "insider" | "suspicious" | "clean"
