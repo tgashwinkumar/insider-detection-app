@@ -64,14 +64,6 @@ def _trade_to_response(trade: Trade, score: Optional[InsiderScore]) -> dict:
     }
 
 
-def _dispatch_ingest(condition_id: str) -> None:
-    try:
-        from app.tasks.ingest_market import ingest_market_task
-        ingest_market_task.delay(condition_id)
-    except Exception as e:
-        logger.warning(f"Could not dispatch ingest task for {condition_id}: {e}")
-
-
 def _dispatch_score(condition_id: str) -> None:
     try:
         from app.tasks.score_market import score_market_task
@@ -102,7 +94,6 @@ async def search_markets(
         for gm in gamma_markets:
             try:
                 market = await market_service.upsert_market(gm)
-                _dispatch_ingest(market.condition_id)
                 result.append(_market_to_response(market))
             except Exception as e:
                 logger.warning(f"Failed to upsert market from event: {e}")
@@ -152,10 +143,10 @@ async def get_market_trades(condition_id: str):
     trades = await Trade.find(Trade.condition_id == condition_id).to_list()
 
     if not trades:
-        # Trigger ingestion via Celery (idempotent guard in ingest_market prevents duplicates)
-        _dispatch_ingest(condition_id)
-
-        # Check job status so the frontend knows what's happening
+        # Do NOT dispatch here — the frontend calls GET /api/ingest?q={id} explicitly
+        # which creates the PENDING job first and then dispatches once.
+        # Dispatching here too creates a second Celery task with no Redis job,
+        # causing a race condition that leaves the UI stuck at "Queued for indexing".
         from app.services.indexer import ingest_job
         job = await ingest_job.get_job(condition_id)
 

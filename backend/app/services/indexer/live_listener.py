@@ -99,25 +99,12 @@ async def _process_log(log: dict) -> None:
 
         amount_usdc = taker_amount / 1e6
 
-        # Get block timestamp
-        import httpx
-        try:
-            r = httpx.post(
-                settings.POLYGON_RPC_URL,
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "eth_getBlockByNumber",
-                    "params": [hex(block_number), False],
-                    "id": 1,
-                },
-                
-                timeout=5.0,
-            )
-            block_data = r.json().get("result", {})
-            timestamp = int(block_data.get("timestamp", "0x0"), 16)
-        except Exception:
-            import time
-            timestamp = int(time.time())
+        # Use wall-clock time as the trade timestamp.
+        # A per-block RPC call here was flooding logs (one request per live trade)
+        # and hitting the wrong chain (eth-mainnet instead of Polygon).
+        # Scoring factors are not sensitive to sub-minute timestamp accuracy.
+        import time
+        timestamp = int(time.time())
 
         # Determine direction from taker_asset_id
         try:

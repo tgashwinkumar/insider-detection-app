@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     MONGODB_DB_NAME: str = "sentinel_insider"
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0"
 
     # Etherscan v2
     ETHERSCAN_API_KEY: str = ""
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Polygon RPC
     POLYGON_RPC_URL: str = "https://polygon.rpc.thirdweb.com"
+    POLYGON_RPC_URL: str = "https://eth-mainnet.g.alchemy.com/v2/oZ1e_DUQ4aPfNuNKKuOxn"
     POLYGON_WS_URL: str = "wss://polygon-bor-rpc.publicnode.com"
 
     # Contract addresses
