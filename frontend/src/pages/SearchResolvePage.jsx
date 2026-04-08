@@ -35,7 +35,7 @@ export default function SearchResolvePage() {
       return
     }
 
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const apiBase = import.meta.env.VITE_API_URL 
 
     searchMarkets(q)
       .then((markets) => {
