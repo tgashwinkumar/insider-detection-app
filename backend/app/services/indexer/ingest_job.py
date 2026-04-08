@@ -67,6 +67,7 @@ async def create_job(condition_id: str, status: str = JobStatus.RUNNING) -> dict
         "tradesIndexed": 0,
         "walletsFound": 0,
         "batchesProcessed": 0,
+        "scoredCount": 0,
         "lastCursor": "",
         "startedAt": _now_iso(),
         "completedAt": None,

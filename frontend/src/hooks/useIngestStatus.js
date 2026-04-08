@@ -8,7 +8,7 @@ const TERMINAL_STATUSES = ['done', 'failed']
  * Stops automatically when status reaches "done" or "failed".
  * Pass null conditionId to disable.
  */
-export function useIngestStatus(conditionId, intervalMs = 2000) {
+export function useIngestStatus(conditionId, intervalMs = 10000) {
   const [job, setJob] = useState(null)
   const intervalRef = useRef(null)
 

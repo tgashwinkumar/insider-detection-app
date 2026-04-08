@@ -46,15 +46,11 @@ def _trade_to_response(trade: Trade, score: Optional[InsiderScore]) -> dict:
             "walletTotalVolumeUsdc": score.source_wallet_total_volume_usdc,
         }
     else:
-        classification = "clean"
-        insider_score = 0.0
-        factors = {
-            "entryTiming": 0.0,
-            "marketCount": 0.0,
-            "tradeSize": 0.0,
-            "walletAge": 0.0,
-            "concentration": 0.0,
-        }
+        # Not yet scored — return null so the frontend can show "Pending"
+        # rather than a misleading 0% / "clean" state.
+        classification = None
+        insider_score = None
+        factors = None
         factor_sources = {
             "entryTimingDeltaSeconds": None,
             "previousTradesByWallet": None,
@@ -218,7 +214,10 @@ async def get_market_trades(condition_id: str):
     trade_responses.sort(key=lambda t: t["timestamp"], reverse=True)
 
     flagged = [t for t in trade_responses if t["classification"] == "insider"]
-    highest = max((t["insiderScore"] for t in trade_responses), default=0.0)
+    highest = max(
+        (t["insiderScore"] for t in trade_responses if t["insiderScore"] is not None),
+        default=0.0,
+    )
     unique_wallets = len({t["wallet"] for t in trade_responses})
 
     if scores_list:

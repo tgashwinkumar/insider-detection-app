@@ -9,7 +9,8 @@
       "mcp__stitch__edit_screens",
       "Bash(python -m pytest tests/unit/test_backfill.py -v)",
       "Bash(python -m pytest tests/unit/test_backfill.py -v -p no:web3)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/unit/test_engine.py tests/unit/test_backfill.py -v)"
     ]
   }
 }

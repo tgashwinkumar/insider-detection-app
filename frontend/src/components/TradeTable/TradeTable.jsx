@@ -13,23 +13,42 @@ import WalletScorePanel from '../WalletScorePanel/WalletScorePanel'
 
 const columnHelper = createColumnHelper()
 
+// null scores sort below all real scores
+function nullLastSortFn(rowA, rowB, columnId) {
+  const a = rowA.getValue(columnId)
+  const b = rowB.getValue(columnId)
+  if (a === null && b === null) return 0
+  if (a === null) return 1
+  if (b === null) return -1
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 const COLUMNS = [
   columnHelper.accessor('classification', { header: 'Classification', enableSorting: true }),
   columnHelper.accessor('wallet', { header: 'Wallet', enableSorting: false }),
   columnHelper.accessor('timestamp', { header: 'Time', enableSorting: true }),
   columnHelper.accessor('sizeUsdc', { header: 'Size (USDC)', enableSorting: true }),
   columnHelper.accessor('direction', { header: 'Direction', enableSorting: false }),
-  columnHelper.accessor('insiderScore', { header: 'Score', enableSorting: true }),
+  columnHelper.accessor('insiderScore', {
+    header: 'Score',
+    enableSorting: true,
+    sortingFn: nullLastSortFn,
+  }),
   columnHelper.accessor('factors', { header: 'Factors', enableSorting: false }),
   columnHelper.display({ id: 'expand', header: '' }),
 ]
 
 const FILTER_OPTIONS = ['all', 'insider', 'suspicious', 'clean']
 
-export default function TradeTable({ trades }) {
+export default function TradeTable({ trades, hasPendingScores }) {
   const [riskFilter, setRiskFilter] = useState('all')
   const [selectedTrade, setSelectedTrade] = useState(null)
   const [sorting, setSorting] = useState([{ id: 'insiderScore', desc: true }])
+
+  const pendingCount = useMemo(
+    () => trades.filter((t) => t.insiderScore === null).length,
+    [trades]
+  )
 
   const filtered = useMemo(
     () => (riskFilter === 'all' ? trades : trades.filter((t) => t.classification === riskFilter)),
@@ -66,9 +85,17 @@ export default function TradeTable({ trades }) {
                   : 'text-muted hover:text-white'
                 }`}
             >
-              {f === 'all' ? `All (${trades.length})` : `${f} (${trades.filter((t) => t.classification === f).length})`}
+              {f === 'all'
+                ? `All (${trades.length})${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`
+                : `${f} (${trades.filter((t) => t.classification === f).length})`}
             </button>
           ))}
+          {hasPendingScores && (
+            <span className="ml-auto flex items-center gap-1.5 text-muted text-xs font-data">
+              <span className="w-1.5 h-1.5 rounded-full bg-suspicious animate-pulse" />
+              scoring…
+            </span>
+          )}
         </div>
 
         {/* Table */}

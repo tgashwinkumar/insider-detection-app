@@ -25,10 +25,13 @@ class ScoringEngine:
     def __init__(self, weights: Optional[dict[str, float]] = None) -> None:
         self.weights = weights or DEFAULT_WEIGHTS
 
-    def _classify(self, score: float) -> str:
+    def _classify(self, score: float, amount_usdc: float) -> str:
+        # Trades under the minimum size are never flagged — too small to be meaningful.
+        if amount_usdc <= settings.MIN_TRADE_SIZE_USDC:
+            return "clean"
         if score >= settings.INSIDER_THRESHOLD:
             return "insider"
-        elif score >= settings.SUSPICIOUS_THRESHOLD:
+        if score >= settings.SUSPICIOUS_THRESHOLD:
             return "suspicious"
         return "clean"
 
@@ -107,7 +110,7 @@ class ScoringEngine:
         )
         composite = max(0.0, min(1.0, composite))
 
-        classification = self._classify(composite)
+        classification = self._classify(composite, trade.amount_usdc)
 
         # Upsert InsiderScore
         existing = await InsiderScore.find_one(InsiderScore.trade_id == trade.transaction_hash)
