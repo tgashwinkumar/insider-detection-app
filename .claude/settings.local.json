@@ -10,7 +10,9 @@
       "Bash(python -m pytest tests/unit/test_backfill.py -v)",
       "Bash(python -m pytest tests/unit/test_backfill.py -v -p no:web3)",
       "Bash(pip install:*)",
-      "Bash(python -m pytest tests/unit/test_engine.py tests/unit/test_backfill.py -v)"
+      "Bash(python -m pytest tests/unit/test_engine.py tests/unit/test_backfill.py -v)",
+      "Bash(python -m pytest tests/unit/test_backfill.py -v -k \"TestUsdcAmount\")",
+      "Bash(python -m pytest tests/unit/ -v)"
     ]
   }
 }

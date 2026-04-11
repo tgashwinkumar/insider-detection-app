@@ -97,7 +97,13 @@ async def _process_log(log: dict) -> None:
         else:
             return
 
-        amount_usdc = taker_amount / 1e6
+        # Use whichever side is USDC (asset ID "0"); same logic as backfill._usdc_amount
+        if taker_asset_id == "0":
+            amount_usdc = taker_amount / 1e6
+        elif maker_asset_id == "0":
+            amount_usdc = maker_amount / 1e6
+        else:
+            amount_usdc = min(maker_amount, taker_amount) / 1e6
 
         # Get block timestamp
         import httpx

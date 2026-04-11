@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ETHERSCAN_API_URL: str = "https://api.etherscan.io/v2/api"
 
     # The Graph
-    THEGRAPH_API_KEY: str = ""
+    THEGRAPH_API_KEY: str = "1e8ca4741dd5cd3726e2423ee784265a"
     POLYMARKET_SUBGRAPH_URL: str = "https://api.thegraph.com/subgraphs/name/polymarket/polymarket"
 
     # Polymarket APIs

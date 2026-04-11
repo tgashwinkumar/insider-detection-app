@@ -9,6 +9,7 @@ Key regressions covered:
 - Per-batch scoring: trades are scored after each batch, not only at the end
 - Wallet enrichment is called only for wallets seen for the first time
 - scoredCount is included in Redis job state updates
+- _usdc_amount picks the correct side (maker or taker) for USDC calculation
 """
 import sys
 import os
@@ -452,3 +453,49 @@ class TestRouterGuardAndDispatch:
         sys.modules.pop("app.tasks.ingest_market", None)
         with patch.dict("sys.modules", {"app.tasks.ingest_market": None}):
             _dispatch("0xcondition")
+
+
+# ---------------------------------------------------------------------------
+# Tests: USDC amount calculation
+# ---------------------------------------------------------------------------
+
+class TestUsdcAmount:
+    """_usdc_amount must pick the correct (USDC) side of every OrderFilled fill."""
+
+    def _fn(self):
+        from app.services.indexer.backfill import _usdc_amount
+        return _usdc_amount
+
+    def test_taker_provides_usdc(self):
+        """takerAssetId == '0' → use takerAmountFilled / 1e6."""
+        fn = self._fn()
+        # taker pays 26,080,749 micro-USDC = $26.08
+        result = fn("82855088000000", "0", 554_909_573, 26_080_749)
+        assert abs(result - 26.080749) < 1e-6
+
+    def test_maker_provides_usdc(self):
+        """makerAssetId == '0' → use makerAmountFilled / 1e6 (the bug case)."""
+        fn = self._fn()
+        # maker pays 154,110,510,000 micro-USDC = $154,110.51
+        result = fn("0", "82855088000000", 154_110_510_000, 554_909_573)
+        assert abs(result - 154_110.51) < 1e-4, (
+            f"Expected $154110.51, got ${result:.6f} — "
+            "this is the bug: old code would have returned "
+            f"{554_909_573 / 1e6:.6f} instead"
+        )
+
+    def test_old_code_would_have_been_wrong(self):
+        """Demonstrates the magnitude of the old bug for a maker-provides-USDC fill."""
+        fn = self._fn()
+        correct = fn("0", "82855088000000", 154_110_510_000, 554_909_573)
+        old_wrong = 554_909_573 / 1e6  # what the old code returned
+        assert correct > old_wrong * 100, (
+            "Correct USDC value should be orders of magnitude larger than "
+            "what the old taker-always formula produced"
+        )
+
+    def test_neither_side_usdc_fallback(self):
+        """When neither asset is USDC, fall back to min(maker, taker) / 1e6."""
+        fn = self._fn()
+        result = fn("111", "222", 1_000_000, 500_000)
+        assert abs(result - 0.5) < 1e-9  # min(1_000_000, 500_000) / 1e6

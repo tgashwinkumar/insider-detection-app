@@ -87,7 +87,6 @@ def factor_trade_size(
 def factor_wallet_age(
     first_deposit_timestamp: Optional[int],
     trade_timestamp: int,
-    fresh_threshold_days: int = 7,
 ) -> float:
     """
     Signal: Was this wallet newly created relative to the trade date?

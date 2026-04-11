@@ -61,6 +61,35 @@ def _determine_direction(event: dict, yes_token_id: str = "", no_token_id: str =
         return "yes"
 
 
+def _usdc_amount(
+    maker_asset_id: str,
+    taker_asset_id: str,
+    maker_amount: float,
+    taker_amount: float,
+) -> float:
+    """
+    Return the USDC value of a fill in human-readable dollars.
+
+    In every OrderFilled event exactly one asset is USDC (asset ID "0");
+    the other is an outcome token. Both are stored as integers scaled by 1e6.
+
+      takerAssetId == "0"  →  taker provides USDC  →  takerAmountFilled / 1e6
+      makerAssetId == "0"  →  maker provides USDC  →  makerAmountFilled / 1e6
+
+    The previous code always used takerAmountFilled / 1e6, which is wrong for
+    SELL orders where the maker provides USDC. Those fills returned the
+    outcome-token amount (in token units) as the dollar value, producing
+    numbers that can be off by thousands of times.
+    """
+    if str(taker_asset_id) == "0":
+        return taker_amount / 1e6
+    if str(maker_asset_id) == "0":
+        return maker_amount / 1e6
+    # Neither side is collateral — shouldn't occur in normal fills.
+    # Fall back to the smaller value as a conservative estimate.
+    return min(maker_amount, taker_amount) / 1e6
+
+
 def _parse_event_to_trade(
     event: dict,
     condition_id: str,
@@ -71,7 +100,9 @@ def _parse_event_to_trade(
     maker_amount = float(event.get("makerAmountFilled", 0))
     taker_amount = float(event.get("takerAmountFilled", 0))
     fee = float(event.get("fee", 0))
-    amount_usdc = taker_amount / 1e6
+    maker_asset_id = str(event.get("makerAssetId", ""))
+    taker_asset_id = str(event.get("takerAssetId", ""))
+    amount_usdc = _usdc_amount(maker_asset_id, taker_asset_id, maker_amount, taker_amount)
 
     return {
         "transaction_hash": event.get("transactionHash") or event.get("id", ""),
@@ -79,8 +110,8 @@ def _parse_event_to_trade(
         "timestamp": ts,
         "maker": (event.get("maker") or "").lower(),
         "taker": (event.get("taker") or "").lower(),
-        "maker_asset_id": event.get("makerAssetId", ""),
-        "taker_asset_id": event.get("takerAssetId", ""),
+        "maker_asset_id": maker_asset_id,
+        "taker_asset_id": taker_asset_id,
         "maker_amount_filled": maker_amount,
         "taker_amount_filled": taker_amount,
         "fee": fee,

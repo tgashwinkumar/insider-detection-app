@@ -78,7 +78,6 @@ class ScoringEngine:
         f_age = factor_wallet_age(
             first_deposit_timestamp=wallet.first_deposit_timestamp,
             trade_timestamp=trade.timestamp,
-            fresh_threshold_days=settings.FRESH_WALLET_DAYS,
         )
 
         # Factor 5: Concentration
