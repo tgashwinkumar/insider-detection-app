@@ -201,6 +201,11 @@ class BackfillOrchestrator:
 
         logger.info(f"Token IDs for {condition_id}: {all_token_ids} (yes={yes_token or 'unknown'}, no={no_token or 'unknown'})")
 
+        # Persist token IDs on the market so the live listener can look them up
+        if all_token_ids and all_token_ids != [condition_id]:
+            market.token_ids = all_token_ids
+            await market.save()
+
         # ── Step 3: Stream OrderFilled events from The Graph ───────────────────
         # Trades are scored incrementally: after each batch is upserted, new
         # wallets are enriched (deposit history + stats) and the batch's trades

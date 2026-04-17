@@ -80,3 +80,78 @@ async def _redis_listener(websocket: WebSocket) -> None:
         pass
     except Exception as e:
         logger.error(f"Redis listener error: {e}")
+
+
+@router.websocket("/ws/market/{condition_id}")
+async def websocket_market(websocket: WebSocket, condition_id: str):
+    """
+    Per-market WebSocket endpoint.
+    Frontend connects when MarketDetailPage mounts for a given conditionId.
+
+    On connect:
+      - Looks up the market's token IDs from MongoDB
+      - Tells PolymarketSubscriptionManager to subscribe those tokens
+      - Subscribes to Redis channel sentinel:live:{condition_id}
+      - Forwards Redis messages (trade_pending / new_trade) to the client
+
+    On disconnect:
+      - Tells manager to unsubscribe (ref-counted; actual Polymarket WS
+        unsubscription only happens when the last viewer leaves)
+    """
+    await websocket.accept()
+
+    from app.models.market import Market
+    from app.redis_client import get_redis
+    from app.services.indexer.polymarket_live_listener import subscription_manager
+
+    # Fetch token IDs stored during backfill ingestion
+    market = await Market.find_one(Market.condition_id == condition_id)
+    token_ids: list[str] = (market.token_ids if market else []) or []
+
+    await subscription_manager.subscribe(condition_id, token_ids)
+
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    channel = f"sentinel:live:{condition_id}"
+    await pubsub.subscribe(channel)
+
+    redis_task = asyncio.create_task(_market_redis_listener(websocket, pubsub))
+    logger.info(f"Market WS connected: {condition_id} (tokens={len(token_ids)})")
+
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning(f"Market WS error ({condition_id}): {e}")
+    finally:
+        redis_task.cancel()
+        try:
+            await pubsub.unsubscribe(channel)
+        except Exception:
+            pass
+        await subscription_manager.unsubscribe(condition_id)
+        logger.info(f"Market WS disconnected: {condition_id}")
+
+
+async def _market_redis_listener(websocket: WebSocket, pubsub) -> None:
+    """Forward per-market Redis pub/sub messages to a single WebSocket client."""
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = json.loads(message["data"])
+                    await websocket.send_json(data)
+                except Exception as e:
+                    logger.warning(f"Failed to forward market update: {e}")
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error(f"Market Redis listener error: {e}")

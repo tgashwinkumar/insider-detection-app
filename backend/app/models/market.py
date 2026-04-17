@@ -15,6 +15,7 @@ class Market(Document):
     liquidity_usdc: float = 0.0
     volume_usdc: float = 0.0
     outcomes: list[str] = ["YES", "NO"]
+    token_ids: list[str] = []  # YES/NO token IDs resolved at ingestion time
     resolved: bool = False
     resolution: Optional[str] = None
     verdict: str = "clean"  # "insider" | "suspicious" | "clean"

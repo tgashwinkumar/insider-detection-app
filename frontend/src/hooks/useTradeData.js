@@ -111,11 +111,24 @@ export function useTradeData(conditionId) {
 
   const hasPendingScores = Boolean(data?.trades?.some((t) => t.insiderScore === null))
 
+  // Called by useMarketWebSocket when a new_trade arrives — refreshes the
+  // API data so data.trades stays in sync even when score polling has stopped.
+  const refreshTrades = useCallback(async () => {
+    if (!conditionId) return
+    try {
+      const result = await getMarketTrades(conditionId)
+      setData(result)
+    } catch {
+      // non-fatal — the WS payload already has the trade data
+    }
+  }, [conditionId])
+
   return {
     data,
     loading,
     error,
     ingestStatus: pollingId ? ingestStatus : null,
     hasPendingScores,
+    refreshTrades,
   }
 }

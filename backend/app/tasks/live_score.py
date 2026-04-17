@@ -69,6 +69,42 @@ async def _process_live_trade(trade_data: dict) -> None:
         await scoring_engine.score_trade(trade, wallet, market)
     except Exception as e:
         logger.error(f"Failed to score live trade {tx_hash}: {e}")
+        return
+
+    # Publish the scored trade to the per-market Redis channel so the frontend
+    # WebSocket connection receives it and replaces the pending placeholder row.
+    #
+    # IMPORTANT: get_redis() relies on init_redis() which is only called in the
+    # FastAPI process. In a Celery worker we create a direct connection instead.
+    if condition_id and condition_id != tx_hash:
+        try:
+            import json
+            import redis.asyncio as aioredis
+            from app.config import settings
+            from app.models.insider_score import InsiderScore
+            from app.routers.markets import _trade_to_response
+
+            score = await InsiderScore.find_one(InsiderScore.trade_id == tx_hash)
+            tr = _trade_to_response(trade, score)
+            if wallet and wallet.first_deposit_timestamp:
+                tr["walletCreatedAt"] = wallet.first_deposit_timestamp * 1000
+            tr["firstTradeAt"] = trade.timestamp * 1000
+
+            # Include the asset IDs so the frontend can match & clear the pending placeholder
+            tr["makerAssetId"] = trade.maker_asset_id
+            tr["takerAssetId"] = trade.taker_asset_id
+
+            _r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            try:
+                await _r.publish(
+                    f"sentinel:live:{condition_id}",
+                    json.dumps({"type": "new_trade", "conditionId": condition_id, "trade": tr}),
+                )
+                logger.info(f"Published scored live trade {tx_hash} to sentinel:live:{condition_id}")
+            finally:
+                await _r.aclose()
+        except Exception as pub_e:
+            logger.warning(f"Failed to publish scored trade to Redis: {pub_e}")
 
 
 @celery_app.task(name="app.tasks.live_score.live_score_task")

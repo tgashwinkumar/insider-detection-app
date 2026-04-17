@@ -1,5 +1,7 @@
+import { useMemo, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useTradeData } from '../hooks/useTradeData'
+import { useMarketWebSocket } from '../hooks/useMarketWebSocket'
 import VerdictBanner from '../components/VerdictBanner/VerdictBanner'
 import SummaryCard from '../components/SummaryCard/SummaryCard'
 import TimelineBar from '../components/TimelineBar/TimelineBar'
@@ -8,7 +10,27 @@ import { formatUsdc, formatDate } from '../utils/formatters'
 
 export default function MarketDetailPage() {
   const { conditionId } = useParams()
-  const { data, loading, error, ingestStatus, hasPendingScores } = useTradeData(conditionId)
+  const { data, loading, error, ingestStatus, hasPendingScores, refreshTrades } = useTradeData(conditionId)
+  const { pendingLiveTrades, newLiveTrades, connected: liveConnected } = useMarketWebSocket(conditionId)
+
+  // When a new scored trade arrives via WebSocket, also refresh the API data
+  // so data.trades stays in sync (handles the case where score polling has stopped).
+  const prevNewLiveCount = useRef(0)
+  useEffect(() => {
+    if (newLiveTrades.length > prevNewLiveCount.current) {
+      prevNewLiveCount.current = newLiveTrades.length
+      refreshTrades()
+    }
+  }, [newLiveTrades.length, refreshTrades])
+
+  // Merge live trades (from WS) on top of polled trades, deduplicating by id
+  const trades = useMemo(() => {
+    const base = data?.trades ?? []
+    if (!newLiveTrades.length) return base
+    const existingIds = new Set(base.map((t) => t.id))
+    const fresh = newLiveTrades.filter((t) => !existingIds.has(t.id))
+    return [...fresh, ...base]
+  }, [data?.trades, newLiveTrades])
 
   if (loading && !data) {
     return (
@@ -32,7 +54,7 @@ export default function MarketDetailPage() {
 
   if (!data) return null
 
-  const { market, trades, verdict, summary } = data
+  const { market, verdict, summary } = data
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,13 +120,21 @@ export default function MarketDetailPage() {
       </div>
 
       {/* Timeline */}
-      <TimelineBar trades={trades} resolutionDate={market.resolutionDate} />
+      <TimelineBar trades={data?.trades ?? []} resolutionDate={market.resolutionDate} />
 
       {/* Trades table or ingestion progress */}
       <div>
-        <h2 className="text-white font-headline font-semibold text-base mb-3">
-          All Trades — Insider Classification
-        </h2>
+        <div className="flex items-center gap-3 mb-3">
+          <h2 className="text-white font-headline font-semibold text-base">
+            All Trades — Insider Classification
+          </h2>
+          {liveConnected && (
+            <span className="flex items-center gap-1.5 text-xs font-data text-clean">
+              <span className="w-1.5 h-1.5 rounded-full bg-clean animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
         {/* Ingestion progress bar — shown while fetching, but doesn't block trade table */}
         {ingestStatus?.isActive && (
           <div className="bg-surface1 border border-border rounded p-4 flex items-center justify-between mb-4">
@@ -128,6 +158,24 @@ export default function MarketDetailPage() {
           <div className="bg-surface1 border border-border rounded p-4 text-center mb-4">
             <p className="text-insider text-sm font-data mb-1">Ingestion failed</p>
             <p className="text-muted text-xs font-mono">{ingestStatus.error}</p>
+          </div>
+        )}
+
+        {/* Pending live trade placeholders (trade seen on Polymarket WS, not yet scored) */}
+        {pendingLiveTrades.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1">
+            {pendingLiveTrades.map((p) => (
+              <div
+                key={`${p.asset_id}-${p.timestamp}`}
+                className="flex items-center gap-3 px-4 py-2.5 bg-surface1 border border-border rounded text-xs font-data text-muted animate-pulse"
+              >
+                <span className="w-2 h-2 rounded-full bg-brand animate-ping" />
+                <span>
+                  Live trade detected — {p.side} {parseFloat(p.size).toFixed(0)} shares
+                  @ ${parseFloat(p.price).toFixed(2)} — scoring in progress…
+                </span>
+              </div>
+            ))}
           </div>
         )}
 

@@ -75,13 +75,14 @@ async def lifespan(app: FastAPI):
     # RUNNING — the in-process queue was lost on restart.
     await _recover_pending_ingest_jobs()
 
-    # Start live event listener
-    # Commenting out live listener - to check for bandwidth availability for subgraphs
-    # try:
-    #     from app.services.indexer.live_listener import start_live_listener
-    #     start_live_listener()
-    # except Exception as e:
-    #     logger.warning(f"Live listener failed to start: {e}")
+    # Start the Polymarket Market Channel WebSocket subscription manager.
+    # It starts with no subscriptions; /ws/market/{condition_id} connections
+    # will subscribe/unsubscribe markets dynamically as users view them.
+    try:
+        from app.services.indexer.polymarket_live_listener import subscription_manager
+        await subscription_manager.start()
+    except Exception as e:
+        logger.warning(f"Polymarket live listener failed to start: {e}")
 
     logger.info("SENTINEL backend ready")
     yield
@@ -94,7 +95,11 @@ async def lifespan(app: FastAPI):
     from app.utils.etherscan import etherscan_client
     from app.services.market_service import market_service
 
-    # stop_live_listener()
+    try:
+        from app.services.indexer.polymarket_live_listener import subscription_manager
+        await subscription_manager.stop()
+    except Exception:
+        pass
     await close_database()
     await close_redis()
     await etherscan_client.close()

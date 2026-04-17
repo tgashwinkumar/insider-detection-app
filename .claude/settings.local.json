@@ -12,7 +12,12 @@
       "Bash(pip install:*)",
       "Bash(python -m pytest tests/unit/test_engine.py tests/unit/test_backfill.py -v)",
       "Bash(python -m pytest tests/unit/test_backfill.py -v -k \"TestUsdcAmount\")",
-      "Bash(python -m pytest tests/unit/ -v)"
+      "Bash(python -m pytest tests/unit/ -v)",
+      "WebFetch(domain:docs.polymarket.com)",
+      "WebFetch(domain:learn.polymarket.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

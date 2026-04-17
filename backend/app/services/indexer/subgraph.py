@@ -125,6 +125,99 @@ query fetchNegRiskEventsMaker($lastId: String!, $assetIds: [String!]!, $first: I
 ORDERFILLED_QUERY = ORDERFILLED_QUERY_TAKER
 NEG_RISK_ORDERFILLED_QUERY = NEG_RISK_ORDERFILLED_QUERY_TAKER
 
+# Timestamp-filtered queries used by live reconciliation (after Polymarket WS event)
+RECENT_EVENTS_TAKER_QUERY = """
+query fetchRecentTaker($assetIds: [String!]!, $afterTs: BigInt!, $first: Int!) {
+  orderFilleds(
+    first: $first,
+    where: { takerAssetId_in: $assetIds, blockTimestamp_gt: $afterTs },
+    orderBy: blockTimestamp,
+    orderDirection: asc
+  ) {
+    id
+    maker
+    taker
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    fee
+    blockTimestamp
+    transactionHash
+    blockNumber
+  }
+}
+"""
+
+RECENT_EVENTS_MAKER_QUERY = """
+query fetchRecentMaker($assetIds: [String!]!, $afterTs: BigInt!, $first: Int!) {
+  orderFilleds(
+    first: $first,
+    where: { makerAssetId_in: $assetIds, blockTimestamp_gt: $afterTs },
+    orderBy: blockTimestamp,
+    orderDirection: asc
+  ) {
+    id
+    maker
+    taker
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    fee
+    blockTimestamp
+    transactionHash
+    blockNumber
+  }
+}
+"""
+
+NEG_RISK_RECENT_EVENTS_TAKER_QUERY = """
+query fetchNegRiskRecentTaker($assetIds: [String!]!, $afterTs: BigInt!, $first: Int!) {
+  negRiskCtfExchangeOrderFilleds(
+    first: $first,
+    where: { takerAssetId_in: $assetIds, blockTimestamp_gt: $afterTs },
+    orderBy: blockTimestamp,
+    orderDirection: asc
+  ) {
+    id
+    maker
+    taker
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    fee
+    blockTimestamp
+    transactionHash
+    blockNumber
+  }
+}
+"""
+
+NEG_RISK_RECENT_EVENTS_MAKER_QUERY = """
+query fetchNegRiskRecentMaker($assetIds: [String!]!, $afterTs: BigInt!, $first: Int!) {
+  negRiskCtfExchangeOrderFilleds(
+    first: $first,
+    where: { makerAssetId_in: $assetIds, blockTimestamp_gt: $afterTs },
+    orderBy: blockTimestamp,
+    orderDirection: asc
+  ) {
+    id
+    maker
+    taker
+    makerAssetId
+    takerAssetId
+    makerAmountFilled
+    takerAmountFilled
+    fee
+    blockTimestamp
+    transactionHash
+    blockNumber
+  }
+}
+"""
+
 # ── Wallet history queries ────────────────────────────────────────────────────
 # All standard OrderFilled events where a specific address is the maker
 WALLET_FILLS_QUERY = """
@@ -454,6 +547,52 @@ class SubgraphIndexer:
 
         logger.info(f"fetch_wallet_all_trades: {len(all_events)} total events for {address}")
         return all_events
+
+    async def fetch_recent_events_by_asset(
+        self,
+        asset_ids: list[str],
+        after_ts: int,
+        batch_size: int = 100,
+    ) -> list[dict]:
+        """
+        Fetch OrderFilled events for the given asset_ids with blockTimestamp > after_ts.
+        Used by the live listener reconciliation step to get full on-chain trade data
+        (maker, taker, tx_hash) after a Polymarket WebSocket last_trade_price event fires.
+        """
+        vars_ = {"assetIds": asset_ids, "afterTs": str(after_ts), "first": batch_size}
+
+        results = await asyncio.gather(
+            self._query(RECENT_EVENTS_TAKER_QUERY, vars_),
+            self._query(RECENT_EVENTS_MAKER_QUERY, vars_),
+            self._query(NEG_RISK_RECENT_EVENTS_TAKER_QUERY, vars_),
+            self._query(NEG_RISK_RECENT_EVENTS_MAKER_QUERY, vars_),
+            return_exceptions=True,
+        )
+
+        taker_data, maker_data, neg_taker_data, neg_maker_data = results
+        raw: list[dict] = []
+        if isinstance(taker_data, dict):
+            raw += taker_data.get("orderFilleds") or []
+        if isinstance(maker_data, dict):
+            raw += maker_data.get("orderFilleds") or []
+        if isinstance(neg_taker_data, dict):
+            raw += neg_taker_data.get("negRiskCtfExchangeOrderFilleds") or []
+        if isinstance(neg_maker_data, dict):
+            raw += neg_maker_data.get("negRiskCtfExchangeOrderFilleds") or []
+
+        seen: set[str] = set()
+        events: list[dict] = []
+        for e in sorted(raw, key=lambda x: x.get("blockTimestamp", "0")):
+            tx = e.get("transactionHash", e.get("id", ""))
+            if tx not in seen:
+                seen.add(tx)
+                events.append(e)
+
+        logger.info(
+            f"fetch_recent_events_by_asset: found {len(events)} new events "
+            f"for assets {asset_ids} after ts={after_ts}"
+        )
+        return events
 
     async def resolve_token_conditions(self, token_ids: list[str]) -> dict[str, str]:
         """
