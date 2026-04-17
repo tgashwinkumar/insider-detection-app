@@ -23,9 +23,9 @@ const FACTOR_DISPLAY = [
 function ScoreBar({ label, score }) {
   const pct = Math.round(score * 100)
   const color =
-    score >= 0.8 ? 'bg-insider' : score >= 0.6 ? 'bg-suspicious' : 'bg-clean'
+    score >= 0.9 ? 'bg-insider' : score >= 0.8 ? 'bg-suspicious' : 'bg-clean'
   const textColor =
-    score >= 0.8 ? 'text-insider' : score >= 0.6 ? 'text-suspicious' : 'text-clean'
+    score >= 0.9 ? 'text-insider' : score >= 0.8 ? 'text-suspicious' : 'text-clean'
 
   return (
     <div className="flex flex-col gap-1">
@@ -46,31 +46,40 @@ function ScoreBar({ label, score }) {
 export default function WalletScorePanel({ trade, onClose }) {
   const [walletData, setWalletData] = useState(null)
 
-  // Fetch full wallet profile whenever the selected trade changes
   useEffect(() => {
     if (!trade?.wallet) return
     setWalletData(null)
     getWalletScore(trade.wallet)
       .then(setWalletData)
-      .catch(() => {}) // silently fail — panel still works from trade prop
+      .catch(() => {})
   }, [trade?.wallet])
 
   if (!trade) return null
 
   const label = KNOWN_WALLETS[trade.wallet]
-  // Use wallet-level factors if available (averaged across all trades), else fall back to trade-level
+  const isScored = trade.insiderScore !== null && trade.insiderScore !== undefined
+
+  // Prefer wallet-level factors (averaged across all trades), else trade-level
   const factors = walletData?.factors || trade.factors
   const radarData = FACTOR_DISPLAY.map(({ key, label }) => ({
     factor: label,
-    score: Math.round((factors[key] || 0) * 100),
+    score: factors ? Math.round((factors[key] || 0) * 100) : 0,
   }))
 
   const scoreColor =
-    trade.insiderScore >= 0.7
+    !isScored
+      ? 'text-muted'
+      : trade.insiderScore >= 0.9
       ? 'text-insider'
-      : trade.insiderScore >= 0.45
+      : trade.insiderScore >= 0.8
       ? 'text-suspicious'
       : 'text-clean'
+
+  // walletAgeDays: prefer factorSources (age at trade time), then wallet-level API
+  const walletAgeDays =
+    trade.factorSources?.walletAgeDays ??
+    walletData?.walletAgeDays ??
+    null
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -101,10 +110,16 @@ export default function WalletScorePanel({ trade, onClose }) {
           <div className="bg-surface2 rounded p-4 flex items-center justify-between">
             <div>
               <p className="text-muted text-xs font-data uppercase tracking-wider mb-1">Insider Score</p>
-              <p className={`text-4xl font-headline font-bold ${scoreColor}`}>
-                {Math.round(trade.insiderScore * 100)}
-                <span className="text-muted text-xl">/100</span>
-              </p>
+              {isScored ? (
+                <p className={`text-4xl font-headline font-bold ${scoreColor}`}>
+                  {Math.round(trade.insiderScore * 100)}
+                  <span className="text-muted text-xl">/100</span>
+                </p>
+              ) : (
+                <p className="text-2xl font-headline font-bold text-muted animate-pulse">
+                  Pending…
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-1 text-right">
               <span
@@ -120,70 +135,83 @@ export default function WalletScorePanel({ trade, onClose }) {
             </div>
           </div>
 
-          {/* Radar chart */}
-          <div>
-            <p className="text-white text-sm font-headline font-semibold mb-3">Factor Breakdown</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <RadarChart data={radarData} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
-                <PolarGrid stroke="#2A2A32" />
-                <PolarAngleAxis
-                  dataKey="factor"
-                  tick={{ fill: '#6B7280', fontSize: 10, fontFamily: 'IBM Plex Sans' }}
-                />
-                <Radar
-                  name="Score"
-                  dataKey="score"
-                  stroke="#EF4444"
-                  fill="#EF4444"
-                  fillOpacity={0.25}
-                  strokeWidth={2}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: '#1C1C22',
-                    border: '1px solid #2A2A32',
-                    borderRadius: '4px',
-                    fontFamily: 'IBM Plex Mono',
-                    fontSize: 12,
-                  }}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
+          {/* Radar chart — only when scored */}
+          {isScored && factors ? (
+            <div>
+              <p className="text-white text-sm font-headline font-semibold mb-3">Factor Breakdown</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <RadarChart data={radarData} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
+                  <PolarGrid stroke="#2A2A32" />
+                  <PolarAngleAxis
+                    dataKey="factor"
+                    tick={{ fill: '#6B7280', fontSize: 10, fontFamily: 'IBM Plex Sans' }}
+                  />
+                  <Radar
+                    name="Score"
+                    dataKey="score"
+                    stroke="#EF4444"
+                    fill="#EF4444"
+                    fillOpacity={0.25}
+                    strokeWidth={2}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#1C1C22',
+                      border: '1px solid #2A2A32',
+                      borderRadius: '4px',
+                      fontFamily: 'IBM Plex Mono',
+                      fontSize: 12,
+                    }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : !isScored ? (
+            <div className="bg-surface2 rounded p-4 text-center">
+              <p className="text-muted text-xs font-data">Factor breakdown available after scoring</p>
+            </div>
+          ) : null}
+
+          {/* Wallet-level stats */}
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: 'Total Trades', value: walletData?.totalTrades ?? '—' },
+              { label: 'Markets Traded', value: walletData?.marketsTraded ?? '—' },
+              { label: 'Total Volume', value: walletData ? formatUsdc(walletData.totalVolumeUsdc) : '—' },
+              {
+                label: 'Wallet Age',
+                value: walletAgeDays !== null
+                  ? (walletAgeDays < 1 ? `${Math.round(walletAgeDays * 24)}h` : `${Math.round(walletAgeDays)}d`)
+                  : '—',
+              },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-surface2 rounded p-2.5">
+                <p className="text-muted text-xs font-data">{label}</p>
+                <p className="text-white text-sm font-mono font-semibold mt-0.5">{value}</p>
+              </div>
+            ))}
           </div>
 
-          {/* Wallet-level stats (from /api/wallets/{address}/score) */}
-          {walletData && (
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Total Trades', value: walletData.totalTrades },
-                { label: 'Markets Traded', value: walletData.marketsTraded },
-                { label: 'Total Volume', value: formatUsdc(walletData.totalVolumeUsdc) },
-                { label: 'Wallet Age', value: walletData.walletAgeDays != null ? `${walletData.walletAgeDays}d` : '—' },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-surface2 rounded p-2.5">
-                  <p className="text-muted text-xs font-data">{label}</p>
-                  <p className="text-white text-sm font-mono font-semibold mt-0.5">{value}</p>
-                </div>
+          {/* Score bars — only when scored */}
+          {isScored && factors && (
+            <div className="flex flex-col gap-3">
+              {FACTOR_DISPLAY.map(({ key, label }) => (
+                <ScoreBar key={key} label={label} score={factors[key] || 0} />
               ))}
             </div>
           )}
 
-          {/* Score bars */}
-          <div className="flex flex-col gap-3">
-            {FACTOR_DISPLAY.map(({ key, label }) => (
-              <ScoreBar key={key} label={label} score={factors[key] || 0} />
-            ))}
-          </div>
-
-          {/* Active factor chips */}
-          <div>
-            <p className="text-muted text-xs font-data uppercase tracking-wider mb-2">Triggered Factors</p>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(trade.factors).map(([key, score]) => (
-                <FactorChip key={key} factor={key} score={score} />
-              ))}
+          {/* Active factor chips — only when scored */}
+          {isScored && factors && (
+            <div>
+              <p className="text-muted text-xs font-data uppercase tracking-wider mb-2">Triggered Factors</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(factors).map(([key, score]) => (
+                  <FactorChip key={key} factor={key} score={score} />
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Wallet timeline */}
           <div>

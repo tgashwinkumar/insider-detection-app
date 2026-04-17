@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ETHERSCAN_API_URL: str = "https://api.etherscan.io/v2/api"
 
     # The Graph
-    THEGRAPH_API_KEY: str = ""
+    THEGRAPH_API_KEY: str = "1e8ca4741dd5cd3726e2423ee784265a"
     POLYMARKET_SUBGRAPH_URL: str = "https://api.thegraph.com/subgraphs/name/polymarket/polymarket"
 
     # Polymarket APIs
@@ -41,9 +41,12 @@ class Settings(BaseSettings):
     USDC_E_ADDRESS: str = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 
     # Scoring
-    MIN_TRADE_SIZE_USDC: float = 5000.0
-    INSIDER_THRESHOLD: float = 0.75
-    SUSPICIOUS_THRESHOLD: float = 0.50
+    # Trades below MIN_TRADE_SIZE_USDC are always "clean" regardless of score.
+    # Above this threshold: score >= INSIDER_THRESHOLD → "insider",
+    # score >= SUSPICIOUS_THRESHOLD → "suspicious", else "clean".
+    MIN_TRADE_SIZE_USDC: float = 5000.0   # gate for factor scoring AND classification
+    INSIDER_THRESHOLD: float = 0.90
+    SUSPICIOUS_THRESHOLD: float = 0.80
     FRESH_WALLET_DAYS: int = 7
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

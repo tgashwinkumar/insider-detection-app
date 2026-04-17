@@ -80,7 +80,6 @@ async def run_calibration() -> dict:
                 "f_age": factor_wallet_age(
                     wallet.first_deposit_timestamp,
                     trade.timestamp,
-                    settings.FRESH_WALLET_DAYS,
                 ),
                 "f_concentration": factor_concentration(
                     trade.amount_usdc,

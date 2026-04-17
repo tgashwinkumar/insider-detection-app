@@ -9,12 +9,23 @@ const BORDER_COLOR = {
   clean: 'border-l-clean',
 }
 
+function scoreColor(score) {
+  if (score === null || score === undefined) return 'text-muted'
+  if (score >= 0.9) return 'text-insider'
+  if (score >= 0.8) return 'text-suspicious'
+  return 'text-clean'
+}
+
 export default function TradeRow({ trade, onClick, isSelected }) {
   const label = KNOWN_WALLETS[trade.wallet]
+  const borderClass = BORDER_COLOR[trade.classification] ?? 'border-l-border'
+
+  // walletAgeDays comes from factorSources (scored at trade time)
+  const walletAgeDays = trade.factorSources?.walletAgeDays
 
   return (
     <tr
-      className={`border-l-2 ${BORDER_COLOR[trade.classification]} cursor-pointer transition-colors
+      className={`border-l-2 ${borderClass} cursor-pointer transition-colors
         ${isSelected ? 'bg-surface2' : 'hover:bg-surface2/60'}`}
       onClick={() => onClick(trade)}
     >
@@ -28,6 +39,13 @@ export default function TradeRow({ trade, onClick, isSelected }) {
         <div className="flex flex-col">
           {label && <span className="text-brand text-xs font-mono font-semibold">{label}</span>}
           <span className="text-muted text-xs font-mono">{truncateAddress(trade.wallet)}</span>
+          {walletAgeDays !== null && walletAgeDays !== undefined && (
+            <span className="text-muted/60 text-xs font-data mt-0.5">
+              {walletAgeDays < 1
+                ? `${Math.round(walletAgeDays * 24)}h old`
+                : `${Math.round(walletAgeDays)}d old`}
+            </span>
+          )}
         </div>
       </td>
 
@@ -36,7 +54,7 @@ export default function TradeRow({ trade, onClick, isSelected }) {
         <span className="text-muted text-xs font-mono">{formatTimestamp(trade.timestamp)}</span>
       </td>
 
-      {/* Size */}
+      {/* Size — factorSources.tradeSizeUsdc should match sizeUsdc */}
       <td className="px-4 py-3 whitespace-nowrap text-right">
         <span className="text-white font-mono text-sm font-semibold">{formatUsdc(trade.sizeUsdc)}</span>
       </td>
@@ -56,25 +74,24 @@ export default function TradeRow({ trade, onClick, isSelected }) {
 
       {/* Insider score */}
       <td className="px-4 py-3 whitespace-nowrap text-right">
-        <span
-          className={`font-mono text-sm font-bold ${
-            trade.insiderScore >= 0.7
-              ? 'text-insider'
-              : trade.insiderScore >= 0.45
-              ? 'text-suspicious'
-              : 'text-clean'
-          }`}
-        >
-          {Math.round(trade.insiderScore * 100)}
-        </span>
+        {trade.insiderScore === null || trade.insiderScore === undefined ? (
+          <span className="font-mono text-sm text-muted">—</span>
+        ) : (
+          <span className={`font-mono text-sm font-bold ${scoreColor(trade.insiderScore)}`}>
+            {Math.round(trade.insiderScore * 100)}
+          </span>
+        )}
       </td>
 
       {/* Factors */}
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
-          {Object.entries(trade.factors).map(([key, score]) => (
-            <FactorChip key={key} factor={key} score={score} />
-          ))}
+          {trade.factors
+            ? Object.entries(trade.factors).map(([key, score]) => (
+                <FactorChip key={key} factor={key} score={score} />
+              ))
+            : <span className="text-muted/50 text-xs font-data italic">scoring…</span>
+          }
         </div>
       </td>
 

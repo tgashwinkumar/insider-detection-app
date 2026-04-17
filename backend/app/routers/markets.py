@@ -38,15 +38,25 @@ def _trade_to_response(trade: Trade, score: Optional[InsiderScore]) -> dict:
             "walletAge": score.factor_wallet_age,
             "concentration": score.factor_concentration,
         }
+        factor_sources = {
+            "entryTimingDeltaSeconds": score.source_entry_timing_delta_seconds,
+            "previousTradesByWallet": score.source_market_count,
+            "tradeSizeUsdc": score.source_trade_size_usdc,
+            "walletAgeDays": score.source_wallet_age_days,
+            "walletTotalVolumeUsdc": score.source_wallet_total_volume_usdc,
+        }
     else:
-        classification = "clean"
-        insider_score = 0.0
-        factors = {
-            "entryTiming": 0.0,
-            "marketCount": 0.0,
-            "tradeSize": 0.0,
-            "walletAge": 0.0,
-            "concentration": 0.0,
+        # Not yet scored — return null so the frontend can show "Pending"
+        # rather than a misleading 0% / "clean" state.
+        classification = None
+        insider_score = None
+        factors = None
+        factor_sources = {
+            "entryTimingDeltaSeconds": None,
+            "previousTradesByWallet": None,
+            "tradeSizeUsdc": trade.amount_usdc,
+            "walletAgeDays": None,
+            "walletTotalVolumeUsdc": None,
         }
 
     return {
@@ -59,6 +69,7 @@ def _trade_to_response(trade: Trade, score: Optional[InsiderScore]) -> dict:
         "classification": classification,
         "insiderScore": insider_score,
         "factors": factors,
+        "factorSources": factor_sources,
         "walletCreatedAt": None,
         "firstTradeAt": None,
     }
@@ -194,7 +205,10 @@ async def get_market_trades(condition_id: str):
     trade_responses.sort(key=lambda t: t["timestamp"], reverse=True)
 
     flagged = [t for t in trade_responses if t["classification"] == "insider"]
-    highest = max((t["insiderScore"] for t in trade_responses), default=0.0)
+    highest = max(
+        (t["insiderScore"] for t in trade_responses if t["insiderScore"] is not None),
+        default=0.0,
+    )
     unique_wallets = len({t["wallet"] for t in trade_responses})
 
     if scores_list:

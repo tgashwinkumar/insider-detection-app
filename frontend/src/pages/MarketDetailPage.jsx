@@ -8,7 +8,7 @@ import { formatUsdc, formatDate } from '../utils/formatters'
 
 export default function MarketDetailPage() {
   const { conditionId } = useParams()
-  const { data, loading, error, ingestStatus } = useTradeData(conditionId)
+  const { data, loading, error, ingestStatus, hasPendingScores } = useTradeData(conditionId)
 
   if (loading && !data) {
     return (
@@ -93,7 +93,7 @@ export default function MarketDetailPage() {
           label="Highest Score"
           value={`${Math.round(summary.highestScore * 100)}/100`}
           icon="🎯"
-          accent={summary.highestScore >= 0.7 ? 'insider' : summary.highestScore >= 0.45 ? 'suspicious' : 'clean'}
+          accent={summary.highestScore >= 0.9 ? 'insider' : summary.highestScore >= 0.8 ? 'suspicious' : 'clean'}
         />
       </div>
 
@@ -105,34 +105,44 @@ export default function MarketDetailPage() {
         <h2 className="text-white font-headline font-semibold text-base mb-3">
           All Trades — Insider Classification
         </h2>
-        {ingestStatus?.isActive ? (
-          <div className="bg-surface1 border border-border rounded p-6 flex flex-col items-center gap-3">
+        {/* Ingestion progress bar — shown while fetching, but doesn't block trade table */}
+        {ingestStatus?.isActive && (
+          <div className="bg-surface1 border border-border rounded p-4 flex items-center justify-between mb-4">
             <div className="flex items-center gap-3 text-brand">
-              <span className="w-5 h-5 border-2 border-muted border-t-brand rounded-full animate-spin" />
-              <span className="font-data text-sm capitalize">
-                {ingestStatus.status === 'pending' ? 'Queued for indexing...' : 'Indexing trades from blockchain...'}
+              <span className="w-4 h-4 border-2 border-muted border-t-brand rounded-full animate-spin" />
+              <span className="font-data text-sm">
+                {ingestStatus.status === 'pending' ? 'Queued for indexing…' : 'Indexing trades from blockchain…'}
               </span>
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono text-muted">
-              <span>{ingestStatus.tradesIndexed} trades indexed</span>
+            <div className="flex items-center gap-3 text-xs font-mono text-muted">
+              <span>{ingestStatus.tradesIndexed} indexed</span>
               <span>·</span>
-              <span>{ingestStatus.walletsFound} wallets found</span>
+              <span>{ingestStatus.walletsFound} wallets</span>
               <span>·</span>
               <span>batch {ingestStatus.batchesProcessed}</span>
             </div>
           </div>
-        ) : ingestStatus?.isFailed ? (
-          <div className="bg-surface1 border border-border rounded p-4 text-center">
+        )}
+
+        {ingestStatus?.isFailed && (
+          <div className="bg-surface1 border border-border rounded p-4 text-center mb-4">
             <p className="text-insider text-sm font-data mb-1">Ingestion failed</p>
             <p className="text-muted text-xs font-mono">{ingestStatus.error}</p>
           </div>
-        ) : (
+        )}
+
+        {/* Trade table — shown as soon as any trades exist, even during ingestion */}
+        {trades.length > 0 ? (
           <>
             <p className="text-muted text-xs font-data mb-4">
               Click any row to view the wallet's full insider score breakdown.
             </p>
-            <TradeTable trades={trades} />
+            <TradeTable trades={trades} hasPendingScores={hasPendingScores} />
           </>
+        ) : !ingestStatus?.isActive && (
+          <div className="bg-surface1 border border-border rounded p-10 text-center text-muted text-sm font-data">
+            No trades found for this market.
+          </div>
         )}
       </div>
     </div>

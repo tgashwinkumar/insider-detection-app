@@ -11,10 +11,14 @@ const CONFIG = {
     label: 'CLEAN',
     className: 'bg-clean/20 text-clean border border-clean/40',
   },
+  pending: {
+    label: 'PENDING',
+    className: 'bg-surface2 text-muted border border-border animate-pulse',
+  },
 }
 
 export default function RiskBadge({ level, size = 'sm' }) {
-  const config = CONFIG[level] || CONFIG.clean
+  const config = CONFIG[level] ?? CONFIG.pending
   const sizeClass = size === 'lg' ? 'px-3 py-1.5 text-sm' : 'px-2 py-0.5 text-xs'
 
   return (

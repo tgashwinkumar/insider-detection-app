@@ -61,6 +61,35 @@ def _determine_direction(event: dict, yes_token_id: str = "", no_token_id: str =
         return "yes"
 
 
+def _usdc_amount(
+    maker_asset_id: str,
+    taker_asset_id: str,
+    maker_amount: float,
+    taker_amount: float,
+) -> float:
+    """
+    Return the USDC value of a fill in human-readable dollars.
+
+    In every OrderFilled event exactly one asset is USDC (asset ID "0");
+    the other is an outcome token. Both are stored as integers scaled by 1e6.
+
+      takerAssetId == "0"  →  taker provides USDC  →  takerAmountFilled / 1e6
+      makerAssetId == "0"  →  maker provides USDC  →  makerAmountFilled / 1e6
+
+    The previous code always used takerAmountFilled / 1e6, which is wrong for
+    SELL orders where the maker provides USDC. Those fills returned the
+    outcome-token amount (in token units) as the dollar value, producing
+    numbers that can be off by thousands of times.
+    """
+    if str(taker_asset_id) == "0":
+        return taker_amount / 1e6
+    if str(maker_asset_id) == "0":
+        return maker_amount / 1e6
+    # Neither side is collateral — shouldn't occur in normal fills.
+    # Fall back to the smaller value as a conservative estimate.
+    return min(maker_amount, taker_amount) / 1e6
+
+
 def _parse_event_to_trade(
     event: dict,
     condition_id: str,
@@ -71,7 +100,9 @@ def _parse_event_to_trade(
     maker_amount = float(event.get("makerAmountFilled", 0))
     taker_amount = float(event.get("takerAmountFilled", 0))
     fee = float(event.get("fee", 0))
-    amount_usdc = taker_amount / 1e6
+    maker_asset_id = str(event.get("makerAssetId", ""))
+    taker_asset_id = str(event.get("takerAssetId", ""))
+    amount_usdc = _usdc_amount(maker_asset_id, taker_asset_id, maker_amount, taker_amount)
 
     return {
         "transaction_hash": event.get("transactionHash") or event.get("id", ""),
@@ -79,8 +110,8 @@ def _parse_event_to_trade(
         "timestamp": ts,
         "maker": (event.get("maker") or "").lower(),
         "taker": (event.get("taker") or "").lower(),
-        "maker_asset_id": event.get("makerAssetId", ""),
-        "taker_asset_id": event.get("takerAssetId", ""),
+        "maker_asset_id": maker_asset_id,
+        "taker_asset_id": taker_asset_id,
         "maker_amount_filled": maker_amount,
         "taker_amount_filled": taker_amount,
         "fee": fee,
@@ -171,18 +202,22 @@ class BackfillOrchestrator:
         logger.info(f"Token IDs for {condition_id}: {all_token_ids} (yes={yes_token or 'unknown'}, no={no_token or 'unknown'})")
 
         # ── Step 3: Stream OrderFilled events from The Graph ───────────────────
-        # fetch_all_events raises RuntimeError if ALL 4 parallel queries fail
-        # (e.g. stale httpx client in a Celery worker). That exception propagates
-        # to ingest_market's try-except, which calls fail_job with the error message.
-        # If only SOME queries fail, fetch_order_filled_events logs those failures
-        # and continues with partial results — we capture them as warnings below.
+        # Trades are scored incrementally: after each batch is upserted, new
+        # wallets are enriched (deposit history + stats) and the batch's trades
+        # are scored immediately. This means scored results are visible to the
+        # frontend while later batches are still being fetched.
         trade_count = 0
+        scored_count = 0
         wallet_addresses: set[str] = set()
+        enriched_wallets: set[str] = set()  # avoid re-enriching across batches
         batches_processed = 0
         last_cursor = ""
 
         async for batch in subgraph_indexer.fetch_all_events(asset_ids=all_token_ids):
             new_in_batch = 0
+            batch_tx_hashes: list[str] = []
+            batch_new_wallets: set[str] = set()
+
             for event in batch:
                 trade_data = _parse_event_to_trade(
                     event, condition_id, yes_token, no_token
@@ -200,40 +235,49 @@ class BackfillOrchestrator:
                         new_in_batch += 1
                     except Exception:
                         pass
+                batch_tx_hashes.append(tx_hash)
                 trade_count += 1
                 last_cursor = event.get("id", "")
 
-                maker = trade_data.get("maker", "")
-                taker = trade_data.get("taker", "")
-                if maker and maker != NULL_ADDRESS:
-                    wallet_addresses.add(maker)
-                if taker and taker != NULL_ADDRESS:
-                    wallet_addresses.add(taker)
+                for addr in (trade_data.get("maker", ""), trade_data.get("taker", "")):
+                    if addr and addr != NULL_ADDRESS:
+                        wallet_addresses.add(addr)
+                        if addr not in enriched_wallets:
+                            batch_new_wallets.add(addr)
 
             batches_processed += 1
+
+            # Enrich wallets seen for the first time in this batch
+            if batch_new_wallets:
+                await self._enrich_wallets_inline(list(batch_new_wallets))
+                enriched_wallets.update(batch_new_wallets)
+
+            # Score the trades from this batch now that wallets are enriched
+            batch_scored = await self._score_batch_inline(
+                condition_id, batch_tx_hashes, market
+            )
+            scored_count += batch_scored
+
             logger.info(
                 f"[{condition_id}] Batch {batches_processed}: "
-                f"+{new_in_batch} new trades, total={trade_count}"
+                f"+{new_in_batch} new trades, scored={batch_scored}, total={trade_count}"
             )
 
-            # Update Redis job state after every batch
+            # Update Redis job state after every batch (scored count is live)
             await ingest_job.update_job(
                 condition_id,
                 tradesIndexed=trade_count,
                 walletsFound=len(wallet_addresses),
                 batchesProcessed=batches_processed,
+                scoredCount=scored_count,
                 lastCursor=last_cursor,
             )
 
         logger.info(
             f"Ingestion complete for {condition_id}: "
-            f"{trade_count} trades, {len(wallet_addresses)} wallets"
+            f"{trade_count} trades, {len(wallet_addresses)} wallets, {scored_count} scored"
         )
 
-        # If no trades were found after a full run, record a warning so the
-        # status API can surface it.  batchesProcessed=0 means the subgraph
-        # returned empty on the very first call — likely a data or query issue
-        # rather than a genuinely empty market.
         if trade_count == 0:
             if batches_processed == 0:
                 msg = (
@@ -250,43 +294,10 @@ class BackfillOrchestrator:
             logger.warning(f"[{condition_id}] {msg}")
             await ingest_job.add_warning(condition_id, msg)
 
-        # ── Step 4: Ensure wallet stubs exist ─────────────────────────────────
-        for addr in wallet_addresses:
-            existing_wallet = await Wallet.find_one(Wallet.address == addr)
-            if not existing_wallet:
-                w = Wallet(address=addr)
-                try:
-                    await w.insert()
-                except Exception:
-                    pass
+        # ── Step 4: Update market verdict from all scored InsiderScore docs ───
+        await self._update_market_verdict(condition_id, market)
 
-        # ── Step 5: Enqueue enrichment + scoring ──────────────────────────────
-        clean_wallets = [
-            a for a in wallet_addresses
-            if a and a != NULL_ADDRESS
-        ]
-        if clean_wallets:
-            dispatched = await self._dispatch_enrichment_and_scoring(
-                condition_id, clean_wallets
-            )
-            if not dispatched:
-                # Celery unavailable — run inline (slower but always works).
-                # Mirror exactly what enrich_wallets_task does: deposits first,
-                # then wallet stats, then score. Without the stats update the
-                # three wallet-dependent factors (marketCount, walletAge,
-                # concentration) all collapse to their fixed fallback values,
-                # making every wallet score identically.
-                from app.services.indexer.deposit_indexer import deposit_indexer
-                from app.services.wallet_service import wallet_service
-                await deposit_indexer.index_wallets(clean_wallets)
-                for addr in clean_wallets:
-                    try:
-                        await wallet_service.update_wallet_stats(addr)
-                    except Exception as e:
-                        logger.warning(f"Inline stat update failed for {addr}: {e}")
-                await self._score_market_inline(condition_id)
-
-        # ── Step 6: Mark job done ──────────────────────────────────────────────
+        # ── Step 5: Mark job done ─────────────────────────────────────────────
         await ingest_job.complete_job(condition_id, trade_count, len(wallet_addresses))
         logger.info(f"Ingestion job marked DONE for {condition_id}")
 
@@ -299,62 +310,82 @@ class BackfillOrchestrator:
             return await market_service.upsert_market(gm_list[0])
         return await Market.find_one(Market.condition_id == condition_id)
 
-    async def _dispatch_enrichment_and_scoring(
-        self, condition_id: str, wallet_addresses: list[str]
-    ) -> bool:
-        """Enqueue Celery chain. Returns True if dispatched, False if Celery unavailable."""
+    async def _enrich_wallets_inline(self, wallet_addresses: list[str]) -> None:
+        """Ensure wallet stubs exist, fetch deposit history, and update stats."""
+        from app.services.indexer.deposit_indexer import deposit_indexer
+        from app.services.wallet_service import wallet_service
+
+        # Create stubs for any wallet not yet in DB
+        for addr in wallet_addresses:
+            existing = await Wallet.find_one(Wallet.address == addr)
+            if not existing:
+                try:
+                    await Wallet(address=addr).insert()
+                except Exception:
+                    pass
+
+        # Fetch on-chain deposit history (first_deposit_timestamp etc.)
         try:
-            from app.tasks.enrich_wallets import enrich_wallets_task
-            from app.tasks.score_market import score_market_task
-            enrich_wallets_task.apply_async(
-                args=[wallet_addresses],
-                link=score_market_task.si(condition_id),
-            )
-            logger.info(f"Celery chain dispatched for {condition_id}")
-            return True
+            await deposit_indexer.index_wallets(wallet_addresses)
         except Exception as e:
-            logger.warning(f"Celery unavailable ({e}), will run inline")
-            return False
+            logger.warning(f"Deposit indexing failed for batch: {e}")
 
-    async def _score_market_inline(self, condition_id: str) -> None:
-        """Score all trades for a market directly (fallback when Celery is unavailable)."""
+        # Update aggregate stats used by scoring (markets_traded, total_volume_usdc, …)
+        for addr in wallet_addresses:
+            try:
+                await wallet_service.update_wallet_stats(addr)
+            except Exception as e:
+                logger.warning(f"Stat update failed for {addr}: {e}")
+
+    async def _score_batch_inline(
+        self,
+        condition_id: str,
+        tx_hashes: list[str],
+        market: Market,
+    ) -> int:
+        """Score the specific trades (by tx hash) from one batch. Returns scored count."""
         from app.scorer.engine import scoring_engine
-        from app.models.insider_score import InsiderScore
 
-        trades = await Trade.find(Trade.condition_id == condition_id).to_list()
-        market = await Market.find_one(Market.condition_id == condition_id)
-        if not market:
-            return
-
-        scored_count = 0
-        for trade in trades:
+        scored = 0
+        for tx_hash in tx_hashes:
+            trade = await Trade.find_one(Trade.transaction_hash == tx_hash)
+            if not trade:
+                continue
             wallet = await Wallet.find_one(Wallet.address == trade.maker)
             if not wallet:
                 wallet = Wallet(address=trade.maker)
-                await wallet.insert()
+                try:
+                    await wallet.insert()
+                except Exception:
+                    pass
             try:
                 await scoring_engine.score_trade(trade, wallet, market)
-                scored_count += 1
+                scored += 1
             except Exception as e:
-                logger.warning(f"Failed to score trade {trade.transaction_hash}: {e}")
+                logger.warning(f"Failed to score trade {tx_hash}: {e}")
+        return scored
 
-        # Update market aggregate verdict
+    async def _update_market_verdict(self, condition_id: str, market: Market) -> None:
+        """Recompute market-level verdict/confidence from all InsiderScore docs."""
+        from app.models.insider_score import InsiderScore
+
         scores = await InsiderScore.find(InsiderScore.condition_id == condition_id).to_list()
-        if scores:
-            max_score_doc = max(scores, key=lambda s: s.composite_score)
-            confidence = int(max_score_doc.composite_score * 100)
-            verdict = max_score_doc.classification
-            top_trade = await Trade.find_one(Trade.transaction_hash == max_score_doc.trade_id)
-            direction = top_trade.direction if top_trade else None
+        if not scores:
+            return
 
-            market.verdict = verdict
-            market.confidence = confidence
-            market.direction = direction
-            market.trader_count = len({s.wallet_address for s in scores})
-            market.last_updated = datetime.now(timezone.utc)
-            await market.save()
+        max_score_doc = max(scores, key=lambda s: s.composite_score)
+        top_trade = await Trade.find_one(Trade.transaction_hash == max_score_doc.trade_id)
 
-        logger.info(f"Inline scoring complete: {scored_count} trades for {condition_id}")
+        market.verdict = max_score_doc.classification
+        market.confidence = int(max_score_doc.composite_score * 100)
+        market.direction = top_trade.direction if top_trade else market.direction
+        market.trader_count = len({s.wallet_address for s in scores})
+        market.last_updated = datetime.now(timezone.utc)
+        await market.save()
+        logger.info(
+            f"Market verdict updated: {condition_id} → {market.verdict} "
+            f"({market.confidence}% confidence)"
+        )
 
     # ── Backward-compat alias used by existing background_tasks calls ─────────
     async def backfill_market(self, condition_id: str) -> None:
